@@ -18,7 +18,12 @@ from pwdlib import PasswordHash
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from .models import AuthSession, PasswordReset, RateLimit, User
+
+# Support both repository package imports and the standalone Vercel service root.
+if __package__:
+    from .models import AuthSession, PasswordReset, RateLimit, User
+else:
+    from models import AuthSession, PasswordReset, RateLimit, User
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:

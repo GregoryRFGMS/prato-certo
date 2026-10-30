@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import AccessibleDialog from './AccessibleDialog.vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   LayoutDashboard,
@@ -49,6 +50,41 @@ const mobile = ref(false),
   target = ref(35),
   simPrice = ref(34),
   simFee = ref(12);
+const mobileViewport = ref(window.matchMedia('(max-width: 650px)').matches);
+const sidebar = ref<HTMLElement>();
+const menuButton = ref<HTMLButtonElement>();
+function closeMenu() {
+  mobile.value = false;
+  menuButton.value?.focus();
+}
+function leaveMenu(event: FocusEvent) {
+  if (
+    mobileViewport.value &&
+    event.relatedTarget instanceof Node &&
+    !sidebar.value?.contains(event.relatedTarget)
+  ) {
+    mobile.value = false;
+  }
+}
+watch(mobile, async (open) => {
+  if (open) {
+    await nextTick();
+    sidebar.value?.querySelector<HTMLElement>('button.active, a')?.focus();
+  }
+});
+watch(
+  () => route.path,
+  () => {
+    modal.value = '';
+    mobile.value = false;
+    editRecipe.value = null;
+    error.value = '';
+  },
+);
+watch(editRecipe, async () => {
+  await nextTick();
+  document.querySelector<HTMLElement>('main h1')?.focus();
+});
 let toastTimer: any;
 function notify(s: string) {
   toast.value = s;
@@ -117,6 +153,7 @@ const trend = computed(() => {
     const ds = d.toLocaleDateString('en-CA');
     const ss = sales.value.filter((s) => s.date === ds);
     a.push({
+      fullDate: ds,
       date: ds.slice(8),
       value: ss.reduce((a, s) => a + s.qty * s.price, 0),
       c: ss.reduce((a, s) => a + contribution(s.price, s.cost, s.fee, s.extra) * s.qty, 0),
@@ -127,6 +164,7 @@ const trend = computed(() => {
 const filteredIngredients = computed(() =>
   store.ingredients.filter((i) => i.name.toLowerCase().includes(search.value.toLowerCase())),
 );
+const trendMaximum = computed(() => Math.max(1, ...trend.value.map((day) => day.value)));
 const filteredRecipes = computed(() =>
   store.recipes.filter((i) => i.name.toLowerCase().includes(search.value.toLowerCase())),
 );
@@ -145,6 +183,7 @@ function navigate(p: string) {
   search.value = '';
   editRecipe.value = null;
   mobile.value = false;
+  nextTick(() => document.querySelector<HTMLElement>('main h1')?.focus());
 }
 function openIngredient(i?: any) {
   form.value = i
@@ -219,6 +258,7 @@ function saveRecipe() {
     notify('Ficha técnica salva.');
   } catch (e: any) {
     error.value = e.message;
+    nextTick(() => document.getElementById('recipe-error')?.focus());
   }
 }
 const draftCost = computed(() => {
@@ -265,6 +305,17 @@ function selectSimulation() {
 }
 const lifecycle = new AbortController();
 onMounted(() => {
+  const media = window.matchMedia('(max-width: 650px)');
+  media.addEventListener(
+    'change',
+    (event) => {
+      const focusInSidebar = sidebar.value?.contains(document.activeElement);
+      mobileViewport.value = event.matches;
+      mobile.value = false;
+      if (event.matches && focusInSidebar) nextTick(() => menuButton.value?.focus());
+    },
+    { signal: lifecycle.signal },
+  );
   const ctx = (document as any).modelContext;
   if (ctx?.registerTool)
     try {
@@ -299,7 +350,22 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell">
-    <aside :class="['sidebar', { open: mobile }]">
+    <aside
+      ref="sidebar"
+      id="kitchen-navigation"
+      :class="['sidebar', { open: mobile }]"
+      :inert="mobileViewport && !mobile"
+      @keydown.esc.prevent="closeMenu"
+      @focusout="leaveMenu"
+    >
+      <button
+        v-if="mobileViewport && mobile"
+        class="icon-button mobile-close"
+        aria-label="Fechar navegação"
+        @click="closeMenu"
+      >
+        <X :size="20" />
+      </button>
       <a class="brand" href="#/app" @click.prevent="navigate('/app')"
         ><span class="brand-icon"><ChefHat :size="23" /></span>prato<span class="brand-light"
           >certo</span
@@ -310,11 +376,12 @@ onUnmounted(() => {
         <div><strong>Cozinha do Gregory</strong><small>Meu estabelecimento</small></div>
       </div>
       <span class="nav-caption">GESTÃO DA COZINHA</span>
-      <nav>
+      <nav aria-label="Gestão da cozinha">
         <button
           v-for="n in nav"
           :key="n.path"
           :class="{ active: route.path === n.path }"
+          :aria-current="route.path === n.path ? 'page' : undefined"
           @click="navigate(n.path)"
         >
           <component :is="n.icon" :size="19" />{{ n.label
@@ -341,7 +408,10 @@ onUnmounted(() => {
         <div class="breadcrumb">
           <button
             class="mobile-toggle icon-button"
-            aria-label="Abrir navegação"
+            ref="menuButton"
+            :aria-label="mobile ? 'Fechar navegação' : 'Abrir navegação'"
+            :aria-expanded="mobile"
+            aria-controls="kitchen-navigation"
             @click="mobile = !mobile"
           >
             <Menu /></button
@@ -350,13 +420,13 @@ onUnmounted(() => {
         </div>
         <span class="demo-badge"><span></span>Ambiente de demonstração</span>
       </header>
-      <main>
+      <main id="main-content" tabindex="-1">
         <div class="page-title">
           <div>
             <div class="eyebrow">
               {{ route.path === '/app' ? 'COZINHA EM NÚMEROS' : 'SUA OPERAÇÃO, ORGANIZADA' }}
             </div>
-            <h1>
+            <h1 tabindex="-1">
               {{
                 editRecipe
                   ? editRecipe.id
@@ -443,13 +513,13 @@ onUnmounted(() => {
                 <span><i class="legend-green"></i>Receita de vendas</span
                 ><span><i class="legend-lime"></i>Contribuição</span>
               </div>
-              <div class="chart">
+              <div class="chart" aria-hidden="true">
                 <div class="chart-y">
-                  <span>{{ money(Math.max(1, ...trend.map((t) => t.value))) }}</span
-                  ><span>{{ money(Math.max(1, ...trend.map((t) => t.value)) / 2) }}</span
+                  <span>{{ money(trendMaximum) }}</span
+                  ><span>{{ money(trendMaximum / 2) }}</span
                   ><span>R$ 0</span>
                 </div>
-                <div class="bars">
+                <div class="bars" :style="{ '--chart-days': trend.length }">
                   <div
                     class="bar-group"
                     v-for="(t, index) in trend"
@@ -460,15 +530,13 @@ onUnmounted(() => {
                       <div
                         class="bar revenue-bar"
                         :style="{
-                          height: (t.value / Math.max(1, ...trend.map((t) => t.value))) * 100 + '%',
+                          height: (t.value / trendMaximum) * 100 + '%',
                         }"
                       ></div>
                       <div
                         class="bar contribution-bar"
                         :style="{
-                          height:
-                            (Math.max(0, t.c) / Math.max(1, ...trend.map((t) => t.value))) * 100 +
-                            '%',
+                          height: (Math.max(0, t.c) / trendMaximum) * 100 + '%',
                         }"
                       ></div>
                     </div>
@@ -476,6 +544,35 @@ onUnmounted(() => {
                   </div>
                 </div>
               </div>
+              <details class="chart-data">
+                <summary>Consultar valores por dia</summary>
+                <div
+                  class="table-wrap"
+                  tabindex="0"
+                  role="region"
+                  aria-label="Valores diários de vendas e contribuição"
+                >
+                  <table>
+                    <caption class="sr-only">
+                      Vendas e contribuição nos últimos 14 dias
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Data</th>
+                        <th scope="col">Receita de vendas</th>
+                        <th scope="col">Contribuição</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="day in trend" :key="day.fullDate">
+                        <th scope="row">{{ day.fullDate.split('-').reverse().join('/') }}</th>
+                        <td>{{ money(day.value) }}</td>
+                        <td>{{ money(day.c) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
               <div class="chart-note">Valores estimados a partir das vendas registradas.</div>
             </section>
             <section class="insight">
@@ -509,7 +606,10 @@ onUnmounted(() => {
                 Ver fichas técnicas <ArrowUpRight :size="16" />
               </button>
             </div>
-            <div class="table-wrap">
+            <p class="table-scroll-hint">
+              Deslize a tabela para ver todas as colunas ou use as setas do teclado.
+            </p>
+            <div class="table-wrap" tabindex="0" role="region" aria-label="Resultado por prato">
               <table>
                 <thead>
                   <tr>
@@ -567,7 +667,10 @@ onUnmounted(() => {
               </div>
               <span class="muted-label">{{ filteredIngredients.length }} insumos</span>
             </div>
-            <div class="table-wrap">
+            <p class="table-scroll-hint">
+              Deslize a tabela para ver todas as colunas ou use as setas do teclado.
+            </p>
+            <div class="table-wrap" tabindex="0" role="region" aria-label="Insumos cadastrados">
               <table>
                 <thead>
                   <tr>
@@ -619,6 +722,7 @@ onUnmounted(() => {
             </div>
             <div v-if="!filteredIngredients.length" class="empty">
               Nenhum insumo encontrado. Experimente outro nome ou cadastre um novo.
+              <button v-if="search" class="secondary" @click="search = ''">Limpar busca</button>
             </div>
           </section>
           <div class="notice">
@@ -669,6 +773,7 @@ onUnmounted(() => {
             </div>
             <div v-if="!filteredRecipes.length" class="empty">
               Nenhuma ficha encontrada.
+              <button v-if="search" class="secondary" @click="search = ''">Limpar busca</button>
             </div></template
           >
           <div v-else class="editor-grid">
@@ -680,6 +785,9 @@ onUnmounted(() => {
               <div class="form-grid">
                 <label class="span-two"
                   >Nome do prato<input
+                    required
+                    :aria-invalid="!!error && !editRecipe.name.trim()"
+                    :aria-describedby="error ? 'recipe-error' : undefined"
                     v-model="editRecipe.name"
                     placeholder="Ex.: Hambúrguer da casa" /></label
                 ><label>Categoria<input v-model="editRecipe.category" /></label
@@ -700,7 +808,7 @@ onUnmounted(() => {
               <div class="ingredient-line" v-for="(it, index) in editRecipe.items" :key="it.id">
                 <span>{{ store.ingredients.find((i) => i.id === it.id)?.name }}</span
                 ><input
-                  aria-label="Quantidade utilizada"
+                  :aria-label="`Quantidade de ${store.ingredients.find((i) => i.id === it.id)?.name}, em ${baseUnit(store.ingredients.find((i) => i.id === it.id)?.unit)}`"
                   type="number"
                   min="0.01"
                   step="0.01"
@@ -708,7 +816,7 @@ onUnmounted(() => {
                 /><small>{{ baseUnit(store.ingredients.find((i) => i.id === it.id)?.unit) }}</small
                 ><button
                   class="icon-button"
-                  aria-label="Remover ingrediente"
+                  :aria-label="`Remover ${store.ingredients.find((i) => i.id === it.id)?.name}`"
                   @click="editRecipe.items.splice(index, 1)"
                 >
                   <Trash2 :size="16" />
@@ -744,7 +852,9 @@ onUnmounted(() => {
               <p class="helper">
                 Não repita a embalagem nas despesas se ela já estiver entre os ingredientes.
               </p>
-              <p class="error" v-if="error">{{ error }}</p>
+              <p id="recipe-error" tabindex="-1" class="error" role="alert" aria-atomic="true">
+                {{ error }}
+              </p>
               <button class="primary" @click="saveRecipe">
                 <Check :size="17" />Salvar ficha técnica
               </button>
@@ -791,6 +901,8 @@ onUnmounted(() => {
                   type="number"
                   min="0"
                   max="99"
+                  :aria-invalid="!!simResult.error"
+                  aria-describedby="simulation-error"
                   v-model.number="simFee"
               /></label>
               <p class="helper">
@@ -804,6 +916,9 @@ onUnmounted(() => {
                   min="5"
                   max="80"
                   step="1"
+                  :aria-valuetext="`${target}%`"
+                  :aria-invalid="!!simResult.error"
+                  aria-describedby="simulation-error"
                   v-model.number="target"
               /></label>
               <div class="range-labels"><span>5%</span><span>80%</span></div>
@@ -819,7 +934,15 @@ onUnmounted(() => {
               <section class="suggestion">
                 <span class="insight-tag"><Calculator :size="17" />PREÇO SUGERIDO</span>
                 <h2 v-if="!simResult.error">{{ money(simResult.price) }}</h2>
-                <p v-else class="error">{{ simResult.error }}</p>
+                <p
+                  id="simulation-error"
+                  class="error"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {{ simResult.error }}
+                </p>
                 <p>Para alcançar {{ target }}% de contribuição com os custos e taxas informados.</p>
                 <div class="suggestion-detail">
                   <span>Custo + despesas por porção</span
@@ -868,6 +991,7 @@ onUnmounted(() => {
                 <p
                   v-if="contribution(simPrice, cost(selected), simFee, selected.extra) < 0"
                   class="error"
+                  role="status"
                 >
                   Este preço não cobre os custos e despesas variáveis.
                 </p>
@@ -888,7 +1012,10 @@ onUnmounted(() => {
               </div>
               <span class="tag">Custos históricos preservados</span>
             </div>
-            <div class="table-wrap">
+            <p class="table-scroll-hint">
+              Deslize a tabela para ver todas as colunas ou use as setas do teclado.
+            </p>
+            <div class="table-wrap" tabindex="0" role="region" aria-label="Vendas registradas">
               <table>
                 <thead>
                   <tr>
@@ -930,14 +1057,12 @@ onUnmounted(() => {
         </footer>
       </main>
     </div>
-    <div class="modal-backdrop" v-if="modal" @click.self="modal = ''">
-      <section
-        class="modal"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="modal === 'ingredient' ? 'Cadastro de insumo' : 'Registrar venda'"
-        @keydown.esc="modal = ''"
-      >
+    <AccessibleDialog
+      v-if="modal"
+      :label="modal === 'ingredient' ? 'Cadastro de insumo' : 'Registrar venda'"
+      @close="modal = ''"
+    >
+      <section class="modal">
         <div class="panel-title">
           <h2>
             {{
@@ -1047,7 +1172,7 @@ onUnmounted(() => {
           </div>
         </form>
       </section>
-    </div>
+    </AccessibleDialog>
     <div class="toast" v-if="toast" role="status"><Check :size="19" />{{ toast }}</div>
   </div>
 </template>

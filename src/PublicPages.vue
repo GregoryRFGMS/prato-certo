@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, nextTick, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ChefHat,
@@ -25,6 +25,11 @@ import { api } from './api';
 import { terms, privacy, legalVersion } from './legal';
 const route = useRoute(),
   router = useRouter();
+const publicMenuButton = ref<HTMLButtonElement>();
+function closePublicMenu() {
+  menu.value = false;
+  publicMenuButton.value?.focus();
+}
 const menu = ref(false),
   showPassword = ref(false),
   busy = ref(false),
@@ -34,6 +39,13 @@ const menu = ref(false),
   user = ref<any>(null),
   resetEnabled = ref(false),
   registrationEnabled = ref(false);
+const loadingAccount = ref(false);
+watch(menu, async (open) => {
+  if (open) {
+    await nextTick();
+    document.querySelector<HTMLElement>('#public-navigation button')?.focus();
+  }
+});
 const name = ref(''),
   email = ref(''),
   kitchen = ref(''),
@@ -79,6 +91,7 @@ async function checkService() {
 onMounted(async () => {
   if (auth.value || path.value === '/conta') await checkService();
   if (path.value === '/conta' && availability.value === 'ready') {
+    loadingAccount.value = true;
     try {
       user.value = await api('/auth/me');
     } catch (e: any) {
@@ -87,13 +100,15 @@ onMounted(async () => {
         return;
       }
       error.value = e.message;
+    } finally {
+      loadingAccount.value = false;
     }
   }
 });
 async function submit() {
   error.value = '';
   notice.value = '';
-  if (availability.value !== 'ready') return;
+  if (busy.value || availability.value !== 'ready') return;
   busy.value = true;
   try {
     if (path.value === '/login') {
@@ -150,9 +165,13 @@ async function logout() {
     busy.value = false;
   }
 }
-function anchor(id: string) {
+async function anchor(id: string) {
   menu.value = false;
-  document.getElementById(id)?.scrollIntoView({
+  await nextTick();
+  const section = document.getElementById(id);
+  section?.setAttribute('tabindex', '-1');
+  section?.focus({ preventScroll: true });
+  section?.scrollIntoView({
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
   });
 }
@@ -177,13 +196,19 @@ const faqs = [
 </script>
 <template>
   <div class="public-site">
-    <header class="public-header">
+    <header class="public-header" @keydown.esc.prevent="closePublicMenu">
       <a class="brand" href="#/"
         ><span class="brand-icon"><ChefHat :size="23" /></span>prato<span class="brand-light"
           >certo</span
         ><span class="brand-dot">.</span></a
       >
-      <nav v-if="path === '/'" class="public-nav" :class="{ expanded: menu }">
+      <nav
+        v-if="path === '/'"
+        id="public-navigation"
+        aria-label="Apresentação do produto"
+        class="public-nav"
+        :class="{ expanded: menu }"
+      >
         <button @click="anchor('recursos')">O que você controla</button
         ><button @click="anchor('como-funciona')">Como funciona</button
         ><button @click="anchor('duvidas')">Dúvidas</button>
@@ -194,6 +219,8 @@ const faqs = [
         ><button
           v-if="path === '/'"
           class="icon-button public-menu"
+          ref="publicMenuButton"
+          aria-controls="public-navigation"
           :aria-expanded="menu"
           aria-label="Menu"
           @click="menu = !menu"
@@ -202,11 +229,14 @@ const faqs = [
         </button>
       </div>
     </header>
-    <main v-if="path === '/'" class="landing-main">
+    <main id="main-content" tabindex="-1" v-if="path === '/'" class="landing-main">
       <section class="landing-hero">
         <div class="hero-copy">
           <div class="landing-kicker"><span></span>PARA QUEM VIVE A COZINHA</div>
-          <h1>Sabor no prato.<br /><span>Clareza na conta.</span></h1>
+          <h1 tabindex="-1">
+            Sabor no prato.<br />
+            <span>Clareza na conta.</span>
+          </h1>
           <p>
             Descubra quanto custa cada receita, encontre seu preço e veja o que sobra de cada venda.
             Do primeiro ingrediente à última porção.
@@ -226,7 +256,15 @@ const faqs = [
         </div>
         <div class="hero-visual">
           <img
-            src="/cozinha-hero.png"
+            src="/cozinha-hero-800.webp"
+            srcset="
+              /cozinha-hero-480.webp   480w,
+              /cozinha-hero-800.webp   800w,
+              /cozinha-hero-1200.webp 1200w,
+              /cozinha-hero-1448.webp 1448w
+            "
+            sizes="(max-width: 520px) calc(100vw - 40px), (max-width: 850px) min(650px, calc(100vw - 60px)), (max-width: 1200px) 50vw, 650px"
+            decoding="async"
             width="1448"
             height="1086"
             alt="Hambúrguer artesanal e ingredientes separados em uma bancada de preparo"
@@ -259,7 +297,10 @@ const faqs = [
         <div class="section-heading">
           <div>
             <span class="landing-kicker">MENOS ACHISMO. MAIS VISIBILIDADE.</span>
-            <h2>Você cuida do preparo.<br />Enxergue também os números.</h2>
+            <h2>
+              Você cuida do preparo.<br />
+              Enxergue também os números.
+            </h2>
           </div>
           <p>Organize o que entra na receita e entenda o que sai de cada venda.</p>
         </div>
@@ -267,7 +308,10 @@ const faqs = [
           <article>
             <span class="feature-icon"><Carrot :size="26" /></span
             ><span class="feature-number">01 / INSUMOS</span>
-            <h3>O preço mudou?<br />Seu custo acompanha.</h3>
+            <h3>
+              O preço mudou?<br />
+              Seu custo acompanha.
+            </h3>
             <p>
               Cadastre a compra em quilos, litros ou unidades. Atualize o valor e veja o impacto nas
               fichas que usam aquele ingrediente.
@@ -277,7 +321,10 @@ const faqs = [
           <article>
             <span class="feature-icon"><BookOpen :size="26" /></span
             ><span class="feature-number">02 / FICHAS TÉCNICAS</span>
-            <h3>Uma receita.<br />Cada porção calculada.</h3>
+            <h3>
+              Uma receita.<br />
+              Cada porção calculada.
+            </h3>
             <p>
               Defina ingredientes, quantidades e rendimento. Inclua a embalagem e descubra quanto
               custa servir uma porção.
@@ -287,7 +334,10 @@ const faqs = [
           <article>
             <span class="feature-icon"><ChartNoAxesCombined :size="26" /></span
             ><span class="feature-number">03 / PRECIFICAÇÃO E VENDAS</span>
-            <h3>Popular no cardápio.<br />E bom para a margem?</h3>
+            <h3>
+              Popular no cardápio.<br />
+              E bom para a margem?
+            </h3>
             <p>
               Simule preços, considere taxas e compare os pratos pela contribuição que geram, além
               da quantidade vendida.
@@ -299,7 +349,11 @@ const faqs = [
       <section id="como-funciona" class="how-section">
         <div class="how-copy">
           <span class="landing-kicker">DA COMPRA À DECISÃO</span>
-          <h2>O caminho entre<br />“acho que sobra”<br />e <em>“agora eu sei”.</em></h2>
+          <h2>
+            O caminho entre<br />
+            “acho que sobra”<br />
+            e <em>“agora eu sei”.</em>
+          </h2>
           <p>
             Comece com um único prato. Você não precisa organizar o cardápio inteiro de uma vez.
           </p>
@@ -343,7 +397,10 @@ const faqs = [
       <section id="duvidas" class="landing-section faq-section">
         <div>
           <span class="landing-kicker">ANTES DE COMEÇAR</span>
-          <h2>Do tamanho da<br />sua dúvida.</h2>
+          <h2>
+            Do tamanho da<br />
+            sua dúvida.
+          </h2>
           <p>O que esta primeira versão faz — e o que ainda vem depois.</p>
         </div>
         <div class="faq-list">
@@ -355,7 +412,10 @@ const faqs = [
       </section>
       <section class="landing-cta">
         <span class="landing-kicker">COMECE POR UMA RECEITA</span>
-        <h2>Seu próximo prato pode ter<br />uma conta mais clara.</h2>
+        <h2>
+          Seu próximo prato pode ter<br />
+          uma conta mais clara.
+        </h2>
         <p>
           Explore o Prato Certo com um cardápio de exemplo. Sem cobrança ou assinatura nesta
           demonstração.
@@ -365,12 +425,16 @@ const faqs = [
         /></a>
       </section>
     </main>
-    <main v-else-if="auth" class="auth-main">
+    <main id="main-content" tabindex="-1" v-else-if="auth" class="auth-main">
       <section class="auth-story">
         <a href="#/" class="auth-back"><ArrowLeft :size="17" />Voltar ao site</a>
         <div class="auth-story-content">
           <span class="landing-kicker">SUA COZINHA MERECE CLAREZA</span>
-          <h2>Uma boa receita<br />também precisa<br />de uma boa conta.</h2>
+          <h2>
+            Uma boa receita<br />
+            também precisa<br />
+            de uma boa conta.
+          </h2>
           <p>
             Organize insumos, conheça o custo por porção e acompanhe o resultado do seu cardápio.
           </p>
@@ -382,7 +446,8 @@ const faqs = [
         </div>
         <div class="auth-story-bottom">
           <ChefHat :size="24" /><span
-            >Feito para quem transforma<br />ingredientes em negócio.</span
+            >Feito para quem transforma<br />
+            ingredientes em negócio.</span
           >
         </div>
       </section>
@@ -395,7 +460,7 @@ const faqs = [
                 ? 'ACESSAR O PRATO CERTO'
                 : 'SEGURANÇA DA CONTA'
           }}</span>
-          <h1>{{ title }}</h1>
+          <h1 tabindex="-1">{{ title }}</h1>
           <p class="auth-subtitle">
             {{
               path === '/cadastro'
@@ -440,7 +505,12 @@ const faqs = [
               A recuperação por e-mail ainda não está disponível. Nenhuma mensagem será enviada.
             </p>
           </div>
-          <form @submit.prevent="submit" class="auth-form">
+          <form
+            @submit.prevent="submit"
+            class="auth-form"
+            :aria-describedby="error ? 'auth-error' : undefined"
+            :aria-busy="busy"
+          >
             <template v-if="path === '/cadastro'"
               ><label for="signup-name"
                 >Seu nome<input
@@ -502,6 +572,8 @@ const faqs = [
                 ><label for="auth-confirmation"
                   >Confirme a senha<input
                     id="auth-confirmation"
+                    :aria-invalid="!!confirmation && password !== confirmation"
+                    :aria-describedby="password ? 'password-requirements' : undefined"
                     :type="showPassword ? 'text' : 'password'"
                     autocomplete="new-password"
                     v-model="confirmation"
@@ -510,7 +582,7 @@ const faqs = [
                     maxlength="128"
                     placeholder="Repita a senha"
                 /></label>
-                <div class="password-requirements" v-if="password">
+                <div id="password-requirements" class="password-requirements" v-if="password">
                   <span
                     v-for="rule in passwordRules.filter((r) => r.label !== 'Até 128 caracteres')"
                     :class="{ met: rule.ok }"
@@ -527,7 +599,7 @@ const faqs = [
                 >.</span
               ></label
             >
-            <p class="auth-error" v-if="error" role="alert">{{ error }}</p>
+            <p id="auth-error" class="auth-error" role="alert" aria-atomic="true">{{ error }}</p>
             <p class="auth-success" v-if="notice" role="status">{{ notice }}</p>
             <button
               class="primary full auth-submit"
@@ -563,11 +635,13 @@ const faqs = [
         </div>
       </section>
     </main>
-    <main v-else-if="legalPage" class="legal-main">
+    <main id="main-content" tabindex="-1" v-else-if="legalPage" class="legal-main">
       <a href="#/" class="legal-back"><ArrowLeft :size="16" />Voltar ao site</a>
       <div class="legal-heading">
         <span class="landing-kicker">TRANSPARÊNCIA DO PROJETO</span>
-        <h1>{{ path === '/termos' ? 'Termos de Serviço' : 'Política de Privacidade' }}</h1>
+        <h1 tabindex="-1">
+          {{ path === '/termos' ? 'Termos de Serviço' : 'Política de Privacidade' }}
+        </h1>
         <p>Atualizado em 11 de setembro de 2026 · Versão de revisão</p>
       </div>
       <div class="legal-draft">
@@ -611,10 +685,10 @@ const faqs = [
         </article>
       </div>
     </main>
-    <main v-else-if="path === '/conta'" class="account-main">
+    <main id="main-content" tabindex="-1" v-else-if="path === '/conta'" class="account-main">
       <span class="landing-kicker">SEU ACESSO AO PRATO CERTO</span>
-      <h1>Minha conta</h1>
-      <div v-if="availability === 'checking'" class="auth-state">
+      <h1 tabindex="-1">Minha conta</h1>
+      <div v-if="availability === 'checking' || loadingAccount" class="auth-state" role="status">
         <LoaderCircle class="spin" />Carregando sua conta…
       </div>
       <div v-else-if="offline" class="auth-state">
@@ -647,7 +721,7 @@ const faqs = [
           <LogOut :size="16" />Sair da conta
         </button>
       </section>
-      <p class="auth-error" v-if="error">{{ error }}</p>
+      <p class="auth-error" role="alert">{{ error }}</p>
     </main>
     <footer class="public-footer">
       <div class="footer-top">
@@ -656,7 +730,10 @@ const faqs = [
             >certo</span
           ><span class="brand-dot">.</span></a
         >
-        <p>Da ficha técnica à decisão.<br />Mais clareza para pequenas cozinhas.</p>
+        <p>
+          Da ficha técnica à decisão.<br />
+          Mais clareza para pequenas cozinhas.
+        </p>
         <div class="footer-links">
           <a href="#/app">Demonstração</a><a href="#/login">Entrar</a
           ><a href="#/termos">Termos de Serviço</a
